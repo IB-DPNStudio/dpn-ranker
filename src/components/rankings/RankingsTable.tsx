@@ -1,0 +1,563 @@
+"use client";
+
+import React, { useState, useMemo, useEffect } from "react";
+import { TrendingUp, Award, Search, Info, ChevronDown, ChevronUp, Loader2, Edit2, Check, X, Eye, EyeOff, Lock } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import Image from "next/image";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { updatePodcastGenre, updatePodcastLanguage, updatePodcastStatus, togglePodcastScoreVisibility, swapPodcastRanks, toggleAllPodcastScoresVisibility } from "@/app/actions/podcasts";
+import { calculateDPNScoreBreakdown } from "@/lib/score";
+
+export function RankingsTable({ podcasts }: { podcasts: any[] }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [languageFilter, setLanguageFilter] = useState("All");
+  const [genreFilter, setGenreFilter] = useState("All");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [editingGenreId, setEditingGenreId] = useState<string | null>(null);
+  const [tempGenre, setTempGenre] = useState("");
+  const [isUpdatingGenre, setIsUpdatingGenre] = useState(false);
+  const [editingLanguageId, setEditingLanguageId] = useState<string | null>(null);
+  const [tempLanguage, setTempLanguage] = useState("");
+  const [isUpdatingLanguage, setIsUpdatingLanguage] = useState(false);
+  const [editingStatusId, setEditingStatusId] = useState<string | null>(null);
+  const [tempStatus, setTempStatus] = useState("");
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [gravitonData, setGravitonData] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    fetch('/graviton_data.json?t=' + Date.now())
+      .then(async (r) => {
+        if (!r.ok) return {};
+        const text = await r.text();
+        try {
+          return JSON.parse(text);
+        } catch(e) {
+          return {};
+        }
+      })
+      .then(data => setGravitonData(data))
+      .catch(e => console.error("Could not load graviton data:", e));
+  }, []);
+
+
+
+  const saveGenre = async (podcastId: string) => {
+    setIsUpdatingGenre(true);
+    try {
+      await updatePodcastGenre(podcastId, tempGenre);
+    } finally {
+      setIsUpdatingGenre(false);
+      setEditingGenreId(null);
+    }
+  };
+
+  const saveLanguage = async (podcastId: string) => {
+    setIsUpdatingLanguage(true);
+    try {
+      await updatePodcastLanguage(podcastId, tempLanguage);
+    } finally {
+      setIsUpdatingLanguage(false);
+      setEditingLanguageId(null);
+    }
+  };
+
+  const saveStatus = async (podcastId: string) => {
+    setIsUpdatingStatus(true);
+    try {
+      await updatePodcastStatus(podcastId, tempStatus);
+    } finally {
+      setIsUpdatingStatus(false);
+      setEditingStatusId(null);
+    }
+  };
+
+  const handleMoveUp = async (e: any, index: number) => {
+    e.stopPropagation();
+    if (index === 0) return;
+    const current = sortedPodcasts[index];
+    const previous = sortedPodcasts[index - 1];
+    const rank1 = gravitonData[current.id]?.manual_rank ?? 1000;
+    const rank2 = gravitonData[previous.id]?.manual_rank ?? 1000;
+    
+    setGravitonData(prev => ({
+      ...prev,
+      [current.id]: { ...prev[current.id], manual_rank: rank2 },
+      [previous.id]: { ...prev[previous.id], manual_rank: rank1 },
+    }));
+    
+    await swapPodcastRanks({ id: current.id, rank: rank1 }, { id: previous.id, rank: rank2 });
+  };
+
+  const handleMoveDown = async (e: any, index: number) => {
+    e.stopPropagation();
+    if (index === sortedPodcasts.length - 1) return;
+    const current = sortedPodcasts[index];
+    const next = sortedPodcasts[index + 1];
+    const rank1 = gravitonData[current.id]?.manual_rank ?? 1000;
+    const rank2 = gravitonData[next.id]?.manual_rank ?? 1000;
+    
+    setGravitonData(prev => ({
+      ...prev,
+      [current.id]: { ...prev[current.id], manual_rank: rank2 },
+      [next.id]: { ...prev[next.id], manual_rank: rank1 },
+    }));
+    
+    await swapPodcastRanks({ id: current.id, rank: rank1 }, { id: next.id, rank: rank2 });
+  };
+
+  const handleToggleScore = async (e: any, podcastId: string) => {
+    e.stopPropagation();
+    const currentStatus = gravitonData[podcastId]?.is_score_hidden || false;
+    
+    setGravitonData(prev => ({
+      ...prev,
+      [podcastId]: { ...prev[podcastId], is_score_hidden: !currentStatus }
+    }));
+    
+    await togglePodcastScoreVisibility(podcastId, currentStatus);
+  };
+
+  const handleToggleAll = async () => {
+    // Check if most are hidden to determine direction
+    const total = sortedPodcasts.length;
+    const hiddenCount = sortedPodcasts.filter(p => gravitonData[p.id]?.is_score_hidden).length;
+    const shouldHideAll = hiddenCount < total / 2; // if less than half are hidden, hide all. else show all.
+    
+    setGravitonData(prev => {
+      const next = { ...prev };
+      sortedPodcasts.forEach(p => {
+        next[p.id] = { ...next[p.id], is_score_hidden: shouldHideAll };
+      });
+      return next;
+    });
+
+    await toggleAllPodcastScoresVisibility(shouldHideAll);
+  };
+
+  // Extract unique languages and genres for filters
+  const languages = useMemo(() => {
+    const langs = new Set(podcasts.map(p => p.primary_language || 'English'));
+    return ["All", ...Array.from(langs).sort()];
+  }, [podcasts]);
+
+  const genres = useMemo(() => {
+    const gs = new Set(podcasts.map(p => p.genre || 'General'));
+    return ["All", ...Array.from(gs).sort()];
+  }, [podcasts]);
+
+  const sortedPodcasts = useMemo(() => {
+    return podcasts
+      .filter((p) => {
+        const matchesSearch = p.show_name.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesLanguage = languageFilter === "All" || p.primary_language === languageFilter;
+        const matchesGenre = genreFilter === "All" || p.genre === genreFilter;
+        return matchesSearch && matchesLanguage && matchesGenre;
+      })
+      .sort((a, b) => {
+        const rankA = gravitonData[a.id]?.manual_rank ?? 1000;
+        const rankB = gravitonData[b.id]?.manual_rank ?? 1000;
+        if (rankA !== rankB) return rankA - rankB;
+        return (b.dpn_score || 0) - (a.dpn_score || 0);
+      });
+  }, [podcasts, searchTerm, languageFilter, genreFilter, gravitonData]);
+
+  return (
+    <div className="w-full">
+      {/* Filters Bar */}
+      <div className="flex flex-col md:flex-row gap-4 mb-8 bg-card border border-border p-4 rounded-xl shadow-sm">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input 
+            placeholder="Search podcasts..." 
+            className="pl-9 h-10"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-4">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground border border-input rounded-md px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors">
+            <input 
+              type="checkbox" 
+              checked={isAdminMode} 
+              onChange={(e) => setIsAdminMode(e.target.checked)} 
+              className="rounded"
+            />
+            Admin Mode
+          </label>
+          <select 
+            className="flex h-10 w-full md:w-48 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={languageFilter}
+            onChange={(e) => setLanguageFilter(e.target.value)}
+          >
+            <option value="All">All Languages</option>
+            {languages.filter(l => l !== 'All').map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+          <select
+            value={genreFilter}
+            onChange={(e) => setGenreFilter(e.target.value)}
+            className="px-4 py-2 bg-muted/50 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-auto min-w-[120px]"
+          >
+            {genres.map(g => (
+              <option key={g} value={g}>{g === "All" ? "All Genres" : g}</option>
+            ))}
+          </select>
+        </div>
+        {isAdminMode && (
+          <button 
+            onClick={handleToggleAll} 
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-muted border border-border text-foreground hover:bg-muted/80 rounded-lg whitespace-nowrap transition-colors text-sm font-medium"
+          >
+            {sortedPodcasts.filter(p => gravitonData[p.id]?.is_score_hidden).length < sortedPodcasts.length / 2 ? (
+              <><EyeOff className="w-4 h-4" /> Hide All Scores</>
+            ) : (
+              <><Eye className="w-4 h-4" /> Show All Scores</>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Ranker Table */}
+      <div className="bg-card border border-border rounded-xl shadow-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[800px]">
+            <thead>
+              <tr className="bg-muted/50 border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+                <th className="p-4 w-20 text-center font-bold">Rank</th>
+                <th className="p-4 font-bold">Creator</th>
+                <th className="p-4 font-bold">Audience / Subs</th>
+                <th className="p-4 font-bold">Category</th>
+                <th className="p-4 font-bold text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    DPN Score
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <Info className="w-4 h-4 text-muted-foreground hover:text-foreground transition-colors" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs text-sm">
+                          <p>
+                            <strong>DPN Score</strong> is an advanced index out of 100 based on:<br/>
+                            1. Cumulative 7-Day Views (50%) - Logarithmic<br/>
+                            2. Engagement Rate (50%)<br/>
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {sortedPodcasts.map((podcast, index) => {
+                const rank = index + 1;
+                return (
+                  <React.Fragment key={podcast.id}>
+                    <tr 
+                      className="hover:bg-muted/30 transition-colors group cursor-pointer"
+                      onClick={() => setExpandedId(expandedId === podcast.id ? null : podcast.id)}
+                    >
+                    <td className="p-4 text-center">
+                      <div className="flex flex-col items-center justify-center gap-1">
+                        {isAdminMode && index > 0 && (
+                          <button onClick={(e) => handleMoveUp(e, index)} className="p-0.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted/50 transition-colors">
+                            <ChevronUp className="w-4 h-4" />
+                          </button>
+                        )}
+                        {rank <= 3 ? (
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                            rank === 1 ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400' :
+                            rank === 2 ? 'bg-slate-400/20 text-slate-600 dark:text-slate-300' :
+                            'bg-amber-700/20 text-amber-700 dark:text-amber-500'
+                          }`}>
+                            <Award className="w-4 h-4 mr-0.5"/>{rank}
+                          </div>
+                        ) : (
+                          <span className="font-mono font-bold text-lg text-muted-foreground">{rank}</span>
+                        )}
+                        {isAdminMode && index < sortedPodcasts.length - 1 && (
+                          <button onClick={(e) => handleMoveDown(e, index)} className="p-0.5 text-muted-foreground hover:text-foreground rounded hover:bg-muted/50 transition-colors">
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center space-x-4">
+                        <div className="relative w-12 h-12 rounded-full overflow-hidden border border-border shadow-sm group-hover:border-dentsu transition-colors flex-shrink-0">
+                          <Image 
+                            src={podcast.thumbnail_url || 'https://via.placeholder.com/150'} 
+                            alt={podcast.show_name} 
+                            fill
+                            sizes="48px"
+                            className="object-cover"
+                          />
+                        </div>
+                        <div>
+                          <div className="font-bold text-base text-foreground group-hover:text-dentsu transition-colors">
+                            {podcast.show_name}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5 flex flex-col items-start gap-1">
+                            {podcast.youtube_url ? (
+                              <a href={podcast.youtube_url} target="_blank" rel="noreferrer" className="hover:underline">
+                                @{podcast.youtube_url.split('@')[1] || 'YouTube'}
+                              </a>
+                            ) : 'Podcast'}
+                            
+                            {editingStatusId === podcast.id ? (
+                              <div className="flex items-center gap-1 mt-1">
+                                <select 
+                                  className="text-xs px-2 py-1 rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                                  value={tempStatus}
+                                  onChange={(e) => setTempStatus(e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <option value="seeded">Seeded</option>
+                                  <option value="verified">Verified</option>
+                                  <option value="approved_partner">Approved Partner</option>
+                                  <option value="featured_partner">Featured Partner</option>
+                                </select>
+                                <button disabled={isUpdatingStatus} onClick={(e) => { e.stopPropagation(); saveStatus(podcast.id); }} className="p-1 text-green-500 hover:bg-green-500/10 rounded">
+                                  {isUpdatingStatus ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                </button>
+                                <button disabled={isUpdatingStatus} onClick={(e) => { e.stopPropagation(); setEditingStatusId(null); }} className="p-1 text-red-500 hover:bg-red-500/10 rounded">
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 mt-1">
+                                {(podcast.status && podcast.status !== 'seeded') && (
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                    podcast.status === 'featured_partner' ? 'bg-dentsu text-white' : 
+                                    podcast.status === 'approved_partner' ? 'bg-green-500/20 text-green-600 dark:text-green-400' : 
+                                    podcast.status === 'verified' ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400' :
+                                    'bg-muted text-muted-foreground'
+                                  }`}>
+                                    {podcast.status.replace('_', ' ')}
+                                  </span>
+                                )}
+                                {isAdminMode && (
+                                  <button 
+                                    onClick={(e) => { 
+                                      e.stopPropagation(); 
+                                      setTempStatus(podcast.status || 'seeded'); 
+                                      setEditingStatusId(podcast.id); 
+                                    }}
+                                    className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="font-mono font-bold">
+                        {podcast.subscriber_count > 1000000 
+                          ? (podcast.subscriber_count / 1000000).toFixed(1) + 'M' 
+                          : (podcast.subscriber_count / 1000).toFixed(1) + 'k'}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Subscribers</div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex flex-col space-y-1 items-start">
+                        {editingGenreId === podcast.id ? (
+                          <div className="flex items-center gap-1">
+                            <input 
+                              type="text" 
+                              className="text-xs px-2 py-1 rounded border border-input bg-background w-24 focus:outline-none focus:ring-1 focus:ring-ring"
+                              value={tempGenre}
+                              onChange={(e) => setTempGenre(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.stopPropagation();
+                                  saveGenre(podcast.id);
+                                } else if (e.key === 'Escape') {
+                                  e.stopPropagation();
+                                  setEditingGenreId(null);
+                                }
+                              }}
+                              autoFocus
+                            />
+                            <button disabled={isUpdatingGenre} onClick={(e) => { e.stopPropagation(); saveGenre(podcast.id); }} className="p-1 text-green-500 hover:bg-green-500/10 rounded">
+                              {isUpdatingGenre ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                            </button>
+                            <button disabled={isUpdatingGenre} onClick={(e) => { e.stopPropagation(); setEditingGenreId(null); }} className="p-1 text-red-500 hover:bg-red-500/10 rounded">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className="bg-secondary text-secondary-foreground px-2 py-0.5 rounded text-xs font-medium">
+                              {podcast.genre || 'General'}
+                            </span>
+                            {isAdminMode && (
+                              <button 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setTempGenre(podcast.genre || 'General'); 
+                                  setEditingGenreId(podcast.id); 
+                                }}
+                                className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {editingLanguageId === podcast.id ? (
+                          <div className="flex items-center gap-1 mt-1">
+                            <input 
+                              type="text" 
+                              className="text-xs px-2 py-1 rounded border border-input bg-background w-24 focus:outline-none focus:ring-1 focus:ring-ring"
+                              value={tempLanguage}
+                              onChange={(e) => setTempLanguage(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.stopPropagation();
+                                  saveLanguage(podcast.id);
+                                } else if (e.key === 'Escape') {
+                                  e.stopPropagation();
+                                  setEditingLanguageId(null);
+                                }
+                              }}
+                              autoFocus
+                            />
+                            <button disabled={isUpdatingLanguage} onClick={(e) => { e.stopPropagation(); saveLanguage(podcast.id); }} className="p-1 text-green-500 hover:bg-green-500/10 rounded">
+                              {isUpdatingLanguage ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                            </button>
+                            <button disabled={isUpdatingLanguage} onClick={(e) => { e.stopPropagation(); setEditingLanguageId(null); }} className="p-1 text-red-500 hover:bg-red-500/10 rounded">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-muted-foreground">{podcast.primary_language || 'English'}</span>
+                            {isAdminMode && (
+                              <button 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setTempLanguage(podcast.primary_language || 'English'); 
+                                  setEditingLanguageId(podcast.id); 
+                                }}
+                                className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-4 text-right">
+                      <div className="flex items-center justify-end space-x-3">
+                        <div className={`inline-flex items-center space-x-1 px-3 py-1 rounded-lg ${gravitonData[podcast.id]?.is_score_hidden && !isAdminMode ? 'bg-transparent' : gravitonData[podcast.id]?.is_score_hidden ? 'bg-muted/50' : 'bg-spotify/10'}`}>
+                          {gravitonData[podcast.id]?.is_score_hidden && !isAdminMode ? (
+                            <Lock className="w-4 h-4 text-muted-foreground/50" />
+                          ) : (
+                            <>
+                              <TrendingUp className={`w-4 h-4 ${gravitonData[podcast.id]?.is_score_hidden ? 'text-muted-foreground' : 'text-spotify'}`} />
+                              <span className={`${gravitonData[podcast.id]?.is_score_hidden ? 'text-muted-foreground line-through opacity-70' : 'text-spotify'} font-mono font-bold text-lg`}>
+                                {podcast.dpn_score || 'N/A'}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        {isAdminMode && (
+                          <button 
+                            onClick={(e) => handleToggleScore(e, podcast.id)} 
+                            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
+                            title={gravitonData[podcast.id]?.is_score_hidden ? "Show Score" : "Hide Score"}
+                          >
+                            {gravitonData[podcast.id]?.is_score_hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        )}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedId(expandedId === podcast.id ? null : podcast.id);
+                          }}
+                          className="p-1 hover:bg-muted rounded-full transition-colors"
+                        >
+                          {expandedId === podcast.id ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedId === podcast.id && (
+                    <tr className="bg-muted/10 border-b border-border">
+                      <td colSpan={5} className="p-6">
+                        <div className="flex flex-col gap-6">
+                          <div>
+                            <h4 className="font-bold text-lg mb-2 text-foreground">About the Creator</h4>
+                            <p className="text-sm text-muted-foreground leading-relaxed max-w-4xl whitespace-pre-wrap">
+                              {podcast.description || "No description provided."}
+                            </p>
+                          </div>
+                          
+
+                          {podcast.channel_id && (
+                            <div>
+                              <h4 className="font-bold text-lg mb-4 text-foreground font-heading">Latest Content</h4>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                                <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black relative">
+                                  <iframe 
+                                    className="w-full h-full"
+                                    src={gravitonData[podcast.id]?.latest_long_id 
+                                      ? `https://www.youtube.com/embed/${gravitonData[podcast.id].latest_long_id}` 
+                                      : `https://www.youtube.com/embed/videoseries?list=${podcast.channel_id?.replace('UC', 'UU')}`} 
+                                    title="Latest Video" 
+                                    frameBorder="0" 
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                    allowFullScreen
+                                    loading="lazy"
+                                  ></iframe>
+                                </div>
+                                <div className="aspect-[9/16] w-full max-w-[240px] rounded-xl overflow-hidden border border-border bg-black mx-auto md:mx-0 relative">
+                                  {gravitonData[podcast.id]?.latest_short_id ? (
+                                    <iframe 
+                                      className="w-full h-full"
+                                      src={`https://www.youtube.com/embed/${gravitonData[podcast.id].latest_short_id}`} 
+                                      title="Latest Short" 
+                                      frameBorder="0" 
+                                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                      allowFullScreen
+                                      loading="lazy"
+                                    ></iframe>
+                                  ) : (
+                                    <div className="w-full h-full flex flex-col items-center justify-center bg-muted text-muted-foreground p-4 text-center">
+                                      <Info className="w-6 h-6 mb-2 opacity-50" />
+                                      <span className="text-xs font-medium">No recent shorts found for this creator.</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+          {sortedPodcasts.length === 0 && (
+            <div className="p-12 text-center text-muted-foreground">
+              No podcasts match your filters.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
