@@ -11,12 +11,20 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [isEmailLoading, setIsEmailLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  const [rateLimitMessage, setRateLimitMessage] = useState("");
   const supabase = createClient();
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
+    
+    if (email.toLowerCase().endsWith("@gmail.com")) {
+      handleGoogleLogin();
+      return;
+    }
+
     setIsEmailLoading(true);
+    setRateLimitMessage("");
     try {
       const { error } = await supabase.auth.signInWithOtp({
         email,
@@ -26,8 +34,13 @@ export default function LoginPage() {
       });
       if (error) throw error;
       setEmailSent(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error sending magic link:", error);
+      if (error.status === 429 || error.message?.toLowerCase().includes("rate limit") || error.message?.toLowerCase().includes("limit exceeded")) {
+        setRateLimitMessage("We are experiencing high traffic. Please try again after some time to join the waitlist.");
+      } else {
+        setRateLimitMessage(error.message || "An error occurred. Please try again.");
+      }
     } finally {
       setIsEmailLoading(false);
     }
@@ -71,6 +84,11 @@ export default function LoginPage() {
                 required
               />
             </div>
+            {rateLimitMessage && (
+              <div className="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-md text-left leading-relaxed">
+                {rateLimitMessage}
+              </div>
+            )}
             <Button 
               type="submit" 
               className="w-full h-12 bg-foreground text-background hover:bg-foreground/90 font-medium"
