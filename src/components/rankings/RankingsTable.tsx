@@ -538,16 +538,18 @@ export function RankingsTable({ podcasts, isAuthenticated = false, isSuperAdmin 
                           </div>
                           
 
-                          {podcast.channel_id && (
+                          {(podcast.channel_id || podcast.youtube_url) && (
                             <div>
                               <h4 className="font-bold text-lg mb-4 text-foreground font-heading">Latest Content</h4>
-                              <div className={`grid grid-cols-1 ${gravitonData[podcast.id]?.latest_short_id && gravitonData[podcast.id].latest_short_id !== 'null' ? 'md:grid-cols-2' : ''} gap-6 items-start`}>
+                              <div className={`grid grid-cols-1 ${((podcast as any).latest_short_url || (gravitonData[podcast.id]?.latest_short_id && gravitonData[podcast.id].latest_short_id !== 'null')) ? 'md:grid-cols-2' : ''} gap-6 items-start`}>
                                 <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black relative">
                                   <iframe 
                                     className="w-full h-full"
-                                    src={gravitonData[podcast.id]?.latest_long_id 
+                                    src={(podcast as any).latest_video_url 
+                                      ? `https://www.youtube.com/embed/${(podcast as any).latest_video_url.split('v=')[1]}`
+                                      : gravitonData[podcast.id]?.latest_long_id 
                                       ? `https://www.youtube.com/embed/${gravitonData[podcast.id].latest_long_id}` 
-                                      : `https://www.youtube.com/embed/videoseries?list=${podcast.channel_id?.replace('UC', 'UU')}`} 
+                                      : podcast.channel_id ? `https://www.youtube.com/embed/videoseries?list=${podcast.channel_id?.replace('UC', 'UU')}` : ''} 
                                     title="Latest Video" 
                                     frameBorder="0" 
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
@@ -555,11 +557,13 @@ export function RankingsTable({ podcasts, isAuthenticated = false, isSuperAdmin 
                                     loading="lazy"
                                   ></iframe>
                                 </div>
-                                {gravitonData[podcast.id]?.latest_short_id && gravitonData[podcast.id].latest_short_id !== 'null' && (
+                                {((podcast as any).latest_short_url || (gravitonData[podcast.id]?.latest_short_id && gravitonData[podcast.id].latest_short_id !== 'null')) && (
                                   <div className="aspect-[9/16] w-full max-w-[240px] rounded-xl overflow-hidden border border-border bg-black mx-auto md:mx-0 relative">
                                     <iframe 
                                       className="w-full h-full"
-                                      src={`https://www.youtube.com/embed/${gravitonData[podcast.id].latest_short_id}`} 
+                                      src={(podcast as any).latest_short_url
+                                        ? `https://www.youtube.com/embed/${(podcast as any).latest_short_url.split('v=')[1]}`
+                                        : `https://www.youtube.com/embed/${gravitonData[podcast.id].latest_short_id}`} 
                                       title="Latest Short" 
                                       frameBorder="0" 
                                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 

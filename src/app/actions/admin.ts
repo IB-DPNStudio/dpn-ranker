@@ -216,16 +216,18 @@ export async function adminSeedPodcast(youtubeUrl: string) {
     let totalVideos = 0;
     let dpnScore = 0;
     let genre = "General";
+    let latestVideoUrl = "";
+    let latestShortUrl = "";
     
     if (apiKey) {
       let channelIdOrHandle = cleanUrl.split('/').pop()?.split('?')[0] || '';
       let endpoint = '';
       
       if (channelIdOrHandle.startsWith('@')) {
-        endpoint = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,topicDetails&forHandle=${encodeURIComponent(channelIdOrHandle)}&key=${apiKey}`;
+        endpoint = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,topicDetails,contentDetails&forHandle=${encodeURIComponent(channelIdOrHandle)}&key=${apiKey}`;
       } else if (youtubeUrl.includes('/channel/')) {
         const id = youtubeUrl.split('/channel/')[1].split('?')[0];
-        endpoint = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,topicDetails&id=${id}&key=${apiKey}`;
+        endpoint = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,topicDetails,contentDetails&id=${id}&key=${apiKey}`;
       }
 
       if (endpoint) {
@@ -247,7 +249,6 @@ export async function adminSeedPodcast(youtubeUrl: string) {
               if (ch.topicDetails?.topicCategories?.length > 0) {
                 const topicUrl = ch.topicDetails.topicCategories[0];
                 const topicRaw = topicUrl.split('/').pop()?.replace(/_/g, ' ').replace(/\(sociology\)/g, '').trim() || 'General';
-                // Simple mapping
                 const lowerTopic = topicRaw.toLowerCase();
                 if (lowerTopic.includes('music')) genre = 'Music';
                 else if (lowerTopic.includes('game') || lowerTopic.includes('gaming')) genre = 'Gaming';
@@ -259,6 +260,45 @@ export async function adminSeedPodcast(youtubeUrl: string) {
                 else if (lowerTopic.includes('sports')) genre = 'Sports';
                 else if (lowerTopic.includes('knowledge') || lowerTopic.includes('education')) genre = 'Education';
                 else genre = topicRaw;
+              }
+
+              // Fetch latest shorts and longs
+              try {
+                const uploadsId = ch.contentDetails?.relatedPlaylists?.uploads;
+                if (uploadsId) {
+                  const pRes = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&playlistId=${uploadsId}&maxResults=20&key=${apiKey}`);
+                  const pData = await pRes.json();
+                  if (pData.items && pData.items.length > 0) {
+                    const videoIds = pData.items.map((i:any) => i.contentDetails.videoId).join(',');
+                    const vRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoIds}&key=${apiKey}`);
+                    const vData = await vRes.json();
+                    
+                    if (vData.items) {
+                      for (const v of vData.items) {
+                        const durationStr = v.contentDetails?.duration || '';
+                        const title = v.snippet?.title || '';
+                        
+                        const parseDuration = (d: string) => {
+                          const match = d.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+                          if (!match) return 0;
+                          return parseInt(match[1] || '0') * 3600 + parseInt(match[2] || '0') * 60 + parseInt(match[3] || '0');
+                        };
+                        
+                        const durationSec = parseDuration(durationStr);
+                        const isShort = durationSec <= 60 || title.toLowerCase().includes('#shorts');
+                        
+                        if (isShort && !latestShortUrl) {
+                          latestShortUrl = `https://www.youtube.com/watch?v=${v.id}`;
+                        } else if (!isShort && !latestVideoUrl) {
+                          latestVideoUrl = `https://www.youtube.com/watch?v=${v.id}`;
+                        }
+                        if (latestShortUrl && latestVideoUrl) break;
+                      }
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error("Failed to fetch latest videos", err);
               }
            }
         }
@@ -277,7 +317,9 @@ export async function adminSeedPodcast(youtubeUrl: string) {
       total_videos: totalVideos,
       dpn_score: dpnScore,
       primary_language: 'Unknown',
-      genre: genre
+      genre: genre,
+      latest_video_url: latestVideoUrl,
+      latest_short_url: latestShortUrl
     });
     
     if (error) throw error;
