@@ -190,25 +190,18 @@ export async function adminSeedPodcast(youtubeUrl: string) {
     let genre = "General";
     
     if (apiKey) {
-      let channelId = '';
       let channelIdOrHandle = youtubeUrl.split('/').pop()?.split('?')[0] || '';
+      let endpoint = '';
       
       if (channelIdOrHandle.startsWith('@')) {
-        // search by handle to get channelId
-        const searchRes = await fetch(`https://www.googleapis.com/youtube/v3/search?part=id&type=channel&q=${encodeURIComponent(channelIdOrHandle)}&key=${apiKey}`);
-        if (searchRes.ok) {
-           const searchData = await searchRes.json();
-           if (searchData.items && searchData.items.length > 0) {
-              channelId = searchData.items[0].id.channelId;
-           }
-        }
+        endpoint = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,topicDetails&forHandle=${encodeURIComponent(channelIdOrHandle)}&key=${apiKey}`;
       } else if (youtubeUrl.includes('/channel/')) {
-        channelId = youtubeUrl.split('/channel/')[1].split('?')[0];
+        const id = youtubeUrl.split('/channel/')[1].split('?')[0];
+        endpoint = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,topicDetails&id=${id}&key=${apiKey}`;
       }
 
-      if (channelId) {
-        // fetch channel details including topicDetails
-        const res = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,topicDetails&id=${channelId}&key=${apiKey}`);
+      if (endpoint) {
+        const res = await fetch(endpoint);
         if (res.ok) {
            const data = await res.json();
            if (data.items && data.items.length > 0) {
