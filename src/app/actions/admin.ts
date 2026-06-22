@@ -285,7 +285,7 @@ export async function adminSeedPodcast(youtubeUrl: string) {
                         };
                         
                         const durationSec = parseDuration(durationStr);
-                        const isShort = durationSec <= 60 || title.toLowerCase().includes('#shorts');
+                        const isShort = durationSec <= 180 || title.toLowerCase().includes('#shorts');
                         
                         if (isShort && !latestShortUrl) {
                           latestShortUrl = `https://www.youtube.com/watch?v=${v.id}`;
