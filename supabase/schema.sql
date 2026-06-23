@@ -53,8 +53,10 @@ CREATE TABLE podcasts (
   network TEXT,
   country TEXT,
   
-  -- Links
+  -- Links & Identifiers
   youtube_url TEXT UNIQUE,
+  channel_id TEXT UNIQUE,
+  contact_email TEXT,
   spotify_url TEXT,
   apple_url TEXT,
   website_url TEXT,

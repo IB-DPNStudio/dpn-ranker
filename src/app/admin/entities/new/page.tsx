@@ -75,10 +75,11 @@ export default function AdminDataEntryPage() {
     setIsLoading(true);
     setMessage({ type: 'info', text: 'Fetching YouTube metadata and analyzing channel...' });
     const youtubeUrl = formData.get("youtubeUrl") as string;
-    const result = await adminSeedPodcast(youtubeUrl);
+    const creatorEmail = formData.get("creatorEmail") as string;
+    const result = await adminSeedPodcast(youtubeUrl, creatorEmail);
     setIsLoading(false);
     if (result.success && result.data) {
-      setMessage({ type: 'success', text: `Podcast successfully seeded! Initial DPN Score: ${result.data.dpnScore}, Genre: ${result.data.genre}` });
+      setMessage({ type: 'success', text: `Podcast successfully seeded! Initial DPN Score: ${result.data.dpnScore}, Genre: ${result.data.genre}. ${creatorEmail ? 'Invite sent.' : ''}` });
       (document.getElementById("seed-form") as HTMLFormElement).reset();
     } else {
       setMessage({ type: 'error', text: result.error || 'Failed to seed podcast.' });
@@ -274,6 +275,10 @@ export default function AdminDataEntryPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">YouTube Channel URL *</label>
                 <Input name="youtubeUrl" type="url" required placeholder="https://www.youtube.com/@ChannelHandle" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Creator Email (Optional)</label>
+                <Input name="creatorEmail" type="email" placeholder="creator@example.com - To send claim invite" />
               </div>
             </div>
 

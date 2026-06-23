@@ -26,7 +26,7 @@ export default async function AdminPodcastsPage() {
   // Fetch approved/featured podcasts using adminClient
   const { data: podcasts } = await adminClient
     .from("podcasts")
-    .select("*")
+    .select("*, profiles(email)")
     .in("status", ["seeded", "verified", "approved_partner", "featured_partner"])
     .order("dpn_score", { ascending: false });
 
@@ -53,6 +53,7 @@ export default async function AdminPodcastsPage() {
             <tr className="bg-muted/30 border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
               <th className="p-4 font-bold w-16">Rank</th>
               <th className="p-4 font-bold">Podcast Name</th>
+              <th className="p-4 font-bold">Creator Email</th>
               <th className="p-4 font-bold">Status</th>
               <th className="p-4 font-bold text-right">Actions</th>
             </tr>
@@ -61,6 +62,8 @@ export default async function AdminPodcastsPage() {
             {podcasts?.map((podcast, index) => {
               const isFeatured = podcast.status === 'featured_partner';
               const handle = podcast.youtube_url ? podcast.youtube_url.trim().replace(/\/+$/, '').split('/').pop() : '';
+              const displayEmail = podcast.profiles?.email || podcast.contact_email || 'Unclaimed';
+              
               return (
                 <tr key={podcast.id} className="hover:bg-muted/30 transition-colors">
                   <td className="p-4 font-bold text-muted-foreground">
@@ -71,6 +74,9 @@ export default async function AdminPodcastsPage() {
                       {podcast.show_name} {handle && <span className="font-normal text-muted-foreground">({handle})</span>}
                     </div>
                     <div className="text-xs text-muted-foreground">{podcast.genre} • {podcast.primary_language}</div>
+                  </td>
+                  <td className="p-4 text-sm text-muted-foreground">
+                    {displayEmail}
                   </td>
                   <td className="p-4">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${

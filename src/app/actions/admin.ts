@@ -253,10 +253,11 @@ export async function adminSeedPodcast(youtubeUrl: string) {
     if (endpoint) {
       const res = await fetch(endpoint);
       if (res.ok) {
-         const data = await res.json();
+          const data = await res.json();
          if (data.items && data.items.length > 0) {
             fetchedSuccessfully = true;
             const ch = data.items[0];
+            const channelId = ch.id;
             showName = ch.snippet.title;
             description = ch.snippet.description;
             coverArt = ch.snippet.thumbnails?.high?.url || ch.snippet.thumbnails?.default?.url;
@@ -321,6 +322,81 @@ export async function adminSeedPodcast(youtubeUrl: string) {
             } catch (err) {
               console.error("Failed to fetch latest videos", err);
             }
+
+            // Check for duplicates using channelId or youtubeUrl fallback
+            const { data: existingPodcasts } = await adminDbClient
+              .from("podcasts")
+              .select("id, status, owner_id, show_name, youtube_url, contact_email")
+              .or(`channel_id.eq.${channelId},youtube_url.eq.${youtubeUrl},youtube_url.eq.${cleanUrl}`);
+            
+            const existing = existingPodcasts && existingPodcasts.length > 0 ? existingPodcasts[0] : null;
+            
+            let error;
+            let podcastId = existing?.id;
+            
+            if (existing) {
+              const { error: updateErr } = await adminDbClient
+                .from("podcasts")
+                .update({
+                  show_name: showName,
+                  channel_id: channelId,
+                  contact_email: creatorEmail || existing.contact_email,
+                  description: description,
+                  cover_art_url: coverArt,
+                  thumbnail_url: coverArt,
+                  subscriber_count: subscriberCount,
+                  total_views: totalViews,
+                  total_videos: totalVideos,
+                  dpn_score: dpnScore,
+                  genre: genre,
+                  latest_video_url: latestVideoUrl,
+                  latest_short_url: latestShortUrl,
+                  updated_at: new Date().toISOString()
+                })
+                .eq("id", existing.id);
+              error = updateErr;
+            } else {
+              const { data: insertedPodcast, error: insertErr } = await adminDbClient
+                .from("podcasts")
+                .insert({
+                  status: 'seeded',
+                  youtube_url: youtubeUrl,
+                  channel_id: channelId,
+                  contact_email: creatorEmail || null,
+                  show_name: showName,
+                  description: description,
+                  cover_art_url: coverArt,
+                  thumbnail_url: coverArt,
+                  subscriber_count: subscriberCount,
+                  total_views: totalViews,
+                  total_videos: totalVideos,
+                  dpn_score: dpnScore,
+                  primary_language: 'Unknown',
+                  genre: genre,
+                  latest_video_url: latestVideoUrl,
+                  latest_short_url: latestShortUrl
+                })
+                .select()
+                .single();
+              error = insertErr;
+              if (insertedPodcast) {
+                podcastId = insertedPodcast.id;
+              }
+            }
+
+            if (error) throw error;
+            
+            // Send Claim Email via Brevo SMTP if requested
+            if (creatorEmail && podcastId) {
+              try {
+                // Dynamically import to prevent edge runtime errors if not supported, 
+                // though server actions usually run in node runtime
+                const { sendClaimEmail } = await import('@/lib/email');
+                await sendClaimEmail(creatorEmail, showName, coverArt, podcastId);
+              } catch (mailErr) {
+                console.error("Failed to send claim email via Brevo:", mailErr);
+              }
+            }
          }
       }
     }
@@ -328,58 +404,6 @@ export async function adminSeedPodcast(youtubeUrl: string) {
     if (!fetchedSuccessfully) {
       throw new Error("YouTube channel not found. Please verify the URL.");
     }
-    
-    // Check if the podcast already exists by checking both youtubeUrl and cleanUrl
-    const { data: existingPodcasts } = await adminDbClient
-      .from("podcasts")
-      .select("id, status, owner_id, show_name, youtube_url")
-      .or(`youtube_url.eq.${youtubeUrl},youtube_url.eq.${cleanUrl}`);
-    
-    const existing = existingPodcasts && existingPodcasts.length > 0 ? existingPodcasts[0] : null;
-    
-    let error;
-    if (existing) {
-      const { error: updateErr } = await adminDbClient
-        .from("podcasts")
-        .update({
-          show_name: showName,
-          description: description,
-          cover_art_url: coverArt,
-          thumbnail_url: coverArt,
-          subscriber_count: subscriberCount,
-          total_views: totalViews,
-          total_videos: totalVideos,
-          dpn_score: dpnScore,
-          genre: genre,
-          latest_video_url: latestVideoUrl,
-          latest_short_url: latestShortUrl,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", existing.id);
-      error = updateErr;
-    } else {
-      const { error: insertErr } = await adminDbClient
-        .from("podcasts")
-        .insert({
-          status: 'seeded',
-          youtube_url: youtubeUrl,
-          show_name: showName,
-          description: description,
-          cover_art_url: coverArt,
-          thumbnail_url: coverArt,
-          subscriber_count: subscriberCount,
-          total_views: totalViews,
-          total_videos: totalVideos,
-          dpn_score: dpnScore,
-          primary_language: 'Unknown',
-          genre: genre,
-          latest_video_url: latestVideoUrl,
-          latest_short_url: latestShortUrl
-        });
-      error = insertErr;
-    }
-
-    if (error) throw error;
     
     revalidatePath("/admin/podcasts");
     revalidatePath("/rankings");
